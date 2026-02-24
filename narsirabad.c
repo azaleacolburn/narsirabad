@@ -18,16 +18,16 @@ Allocator new_allocator(uint32_t initial_size,
     Allocator alloc;
     alloc.headers = map_new(initial_header_capacity);
     if (alloc.headers == NULL) {
-        printf("Failed to allocate allocator");
+        printf("Failed to allocate allocator\n");
         exit(1);
     }
 
-    alloc.headers->free = 0;
+    alloc.headers->free = 1;
     alloc.headers->size = initial_size;
 
     alloc.headers->ptr = map_new(initial_size);
     if (alloc.headers->ptr == 0) {
-        printf("Failed to allocate first block of allocator");
+        printf("Failed to allocate first block of allocator\n");
         exit(1);
     }
 
@@ -39,9 +39,10 @@ Allocator new_allocator(uint32_t initial_size,
 
 /// Guarantees that the returned block will be zeroed
 void* allocate(Allocator* alloc, uint32_t size) {
-    Block* header = alloc->headers;
-    while ((intptr_t)header < alloc->header_len) {
-        if (!header->free || header->size > size)
+    for (int i = 0; i < alloc->header_len; i++) {
+        Block* header = alloc->headers + i;
+
+        if (!header->free || header->size < size)
             continue;
 
         header->free = false;
@@ -55,6 +56,7 @@ void* allocate(Allocator* alloc, uint32_t size) {
         return header->ptr;
     }
 
+    // TODO Garbage Collect
     return NULL;
 }
 
