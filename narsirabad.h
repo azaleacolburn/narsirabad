@@ -10,6 +10,7 @@ typedef struct Block {
     uint32_t size;
     void* ptr;
 } Block;
+
 typedef struct Allocator {
     Block* headers;
     // These are counts of block, not amount of memory remaining
@@ -18,18 +19,16 @@ typedef struct Allocator {
 } Allocator;
 
 // Internal functions
-void try_split_block(Allocator* alloc, Block* header, uint32_t size);
+// TODO Remove these from the header file
+void try_split_block(Block* header, uint32_t size);
 
-void expand_block_list(Allocator* alloc);
+void expand_block_list();
 
-void try_merge_block(Allocator* alloc, Block* header);
+void try_merge_block(Block* header);
 
-// Allocator functions
-Allocator new_allocator(uint32_t initial_size,
-                        uint32_t initial_header_capacity);
+// Exposed functions
+void* allocate(uint32_t size);
 
-void* allocate(Allocator* alloc, uint32_t size);
-
-void deallocate(Allocator* alloc, void* ptr);
+void deallocate(void* ptr);
 
 #endif
