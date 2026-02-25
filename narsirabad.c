@@ -37,16 +37,10 @@ __attribute__((constructor)) void new_allocator() {
 }
 
 __attribute__((destructor)) void destroy_allocator() {
-    // We need to use `header_len`
     for (int i = 0; i < NA.header_len; i++) {
         Block* header = NA.headers + i;
         if (header->ptr == NULL)
             continue;
-
-        // WARNING
-        // We need to be very careful here about double frees
-        // Because we might deallocate a split block which would include another
-        // split block? IDK
 
         int unmap_result = munmap(header->ptr, header->size);
         if (unmap_result == -1) {
