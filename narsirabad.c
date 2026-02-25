@@ -89,7 +89,7 @@ void deallocate(void* ptr) {
         try_merge_block(header);
         break;
     }
-};
+}
 
 // Internal functions
 

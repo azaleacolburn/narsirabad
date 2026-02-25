@@ -5,6 +5,6 @@
 #     cc -shared target/narsirabad.o target/mem.o -o target/libnar.so
 
 build:
-    cc test/main.c narsirabad.c mem.c -o target/main
+    cc test/main.c narsirabad.c mem.c -o target/main -Wall -Werror -Wpedantic
     # set -x LD_LIBRARY_PATH=/home/azalea/projects/narsirabad/target:$LD_LIBRARY_PATH
     # cc test/main.c -L. -lnar -o test/main
