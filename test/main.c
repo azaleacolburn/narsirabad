@@ -13,4 +13,16 @@ int main() {
     b[2] = 5;
     // Should print 0 3 5 0
     printf("%d %d %d %d\n", *b, b[1], b[2], b[3]);
+
+    deallocate(b);
+
+    int* c = allocate(10);
+    if (c == NULL) {
+        printf("Failed to allocate block of size %d", 10 * 8);
+        exit(1);
+    }
+    c[1] = 4;
+    c[2] = 6;
+    // Should print 0 4 6 0
+    printf("%d %d %d %d\n", *c, c[1], c[2], c[3]);
 }

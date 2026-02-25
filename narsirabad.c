@@ -67,10 +67,7 @@ void* allocate(uint32_t size) {
         header->free = false;
         try_split_block(header, size);
 
-        // Clear the buffer
-        for (int i = 0; i < size; i++) {
-            ((char*)header->ptr)[i] = 0;
-        }
+        memset(header->ptr, 0, header->size);
 
         return header->ptr;
     }
@@ -80,13 +77,13 @@ void* allocate(uint32_t size) {
 }
 
 void deallocate(void* ptr) {
-    Block* header = NA.headers;
-    while ((intptr_t)header < NA.header_len) {
+    for (int i = 0; i < NA.header_len; i++) {
+        Block* header = NA.headers + i;
         if (header->ptr != ptr)
             continue;
 
         header->free = true;
-        try_merge_block(header);
+        try_merge_block(i);
         break;
     }
 }
@@ -137,4 +134,40 @@ void expand_block_list() {
 ///
 /// However, merging is necessary because otherwise we would just split forever
 /// and have to allocate new blocks more often.
-void try_merge_block(Block* header) {}
+void try_merge_block(uint16_t header_idx) {
+    Block header = NA.headers[header_idx];
+    intptr_t start = (intptr_t)header.ptr;
+    intptr_t end = start + header.size;
+
+    for (int i = 0; i < NA.header_len; i++) {
+        intptr_t other_start = (intptr_t)header.ptr;
+        intptr_t other_end = other_start + header.size;
+        // TODO Figure out if we want + 1
+        if (other_start == end + 1) {
+            merge_blocks(header_idx, i);
+
+            if (header_idx > i)
+                header_idx--;
+            i--;
+        } else if (other_end + 1 == start) {
+            merge_blocks(i, header_idx);
+
+            if (header_idx > i)
+                header_idx--;
+            i--;
+        }
+    }
+}
+
+void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
+    Block* first = NA.headers + first_idx;
+    Block* second = NA.headers + second_idx;
+
+    // Clear the block
+    first->size += second->size;
+    memset(second->ptr, 0, second->size);
+
+    // Shift the headers over
+    memmove(second, second + 1, sizeof(Block));
+    NA.header_len -= 1;
+}
