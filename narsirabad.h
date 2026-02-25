@@ -7,6 +7,7 @@
 
 typedef struct Block {
     bool free;
+    uint8_t offset;
     uint32_t size;
     void* ptr;
 } Block;
@@ -18,17 +19,6 @@ typedef struct Allocator {
     uint8_t header_capacity;
 } Allocator;
 
-// Internal functions
-// TODO Remove these from the header file
-void try_split_block(Block* header, uint32_t size);
-
-void expand_block_list();
-
-void try_merge_block(uint16_t header_idx);
-
-void merge_blocks(uint16_t first_idx, uint16_t second_idx);
-
-// Exposed functions
 void* allocate(uint32_t size);
 
 void deallocate(void* ptr);

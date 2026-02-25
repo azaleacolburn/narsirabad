@@ -2,6 +2,7 @@
 #include "mem.h"
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,7 @@ __attribute__((constructor)) void new_allocator() {
 
     NA.headers->free = 1;
     NA.headers->size = INITIAL_ALLOCATOR_SIZE;
+    NA.headers->offset = 0;
 
     NA.headers->ptr = map_new(INITIAL_ALLOCATOR_SIZE);
     if (NA.headers->ptr == 0) {
@@ -52,71 +54,7 @@ __attribute__((destructor)) void destroy_allocator() {
     munmap(NA.headers, NA.header_capacity);
 }
 
-// EXPOSED FUNCTIONS
-
-/// Guarantees that the returned block will be zeroed
-// There's an issue where you can just write into another allocation if a larger
-// block is split. I don't exactly know how to make the write fail, not sure if
-// that's what it should do.
-void* allocate(uint32_t size) {
-    for (int i = 0; i < NA.header_len; i++) {
-        Block* header = NA.headers + i;
-
-        if (!header->free || header->size < size)
-            continue;
-
-        header->free = false;
-        try_split_block(header, size);
-
-        memset(header->ptr, 0, header->size);
-
-        return header->ptr;
-    }
-
-    // TODO Garbage Collect
-    return NULL;
-}
-
-void deallocate(void* ptr) {
-    for (int i = 0; i < NA.header_len; i++) {
-        Block* header = NA.headers + i;
-        if (header->ptr != ptr)
-            continue;
-
-        header->free = true;
-        try_merge_block(i);
-
-        break;
-    }
-}
-
 // Internal functions
-
-void try_split_block(Block* header, uint32_t new_size) {
-    int remaining = header->size - new_size;
-    if (remaining <= NEW_BLOCK_THRESHOLD) {
-        return;
-    }
-
-    // Shrink old header
-    header->size = new_size;
-
-    // Put new header in NAator's block list
-    int remaining_in_block_list = NA.header_capacity - NA.header_len;
-    assert(remaining_in_block_list >= 0);
-
-    if (remaining_in_block_list == 0) {
-        expand_block_list();
-    }
-
-    // Create new header
-    Block* next_header = NA.headers + NA.header_len;
-    next_header->free = true;
-    next_header->size = remaining;
-    next_header->ptr = (void*)((intptr_t)header->ptr + new_size);
-
-    NA.header_len++;
-}
 
 void expand_block_list() {
     int old_mem_cap = NA.header_capacity * sizeof(Block);
@@ -132,6 +70,52 @@ void expand_block_list() {
     munmap(NA.headers, old_mem_cap);
 
     NA.header_capacity = old_mem_cap * 2;
+}
+
+/// Attempts to split a freshly allocated block
+///
+/// header - The header of the block you wish to split.
+/// new_size - The new size of the allocation, does not include the offset
+///     If you wish to include the offset, it should be set in `header->offset`
+///     before calling this function.
+void try_split_block(Block* header, uint32_t new_size) {
+    int remaining = header->size - new_size - header->offset;
+    if (remaining <= NEW_BLOCK_THRESHOLD) {
+        return;
+    }
+
+    // Shrink old header
+    header->size = new_size;
+
+    // Put new header in NA's block list
+    int remaining_in_block_list = NA.header_capacity - NA.header_len;
+    assert(remaining_in_block_list >= 0);
+
+    if (remaining_in_block_list == 0) {
+        expand_block_list();
+    }
+
+    // Create new header
+    Block* next_header = NA.headers + NA.header_len;
+    next_header->free = true;
+    next_header->size = remaining;
+    next_header->ptr = (void*)((intptr_t)header->ptr + new_size);
+    next_header->offset = 0;
+
+    NA.header_len++;
+}
+
+void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
+    Block* first = NA.headers + first_idx;
+    Block* second = NA.headers + second_idx;
+
+    // Clear the block
+    first->size += second->size + second->offset;
+    memset(second->ptr, 0, second->size);
+
+    // Shift the headers over
+    memmove(second, second + 1, sizeof(Block) * (NA.header_len - second_idx));
+    NA.header_len -= 1;
 }
 
 /// Attempts to merged a free block with adjacent freed memory
@@ -169,15 +153,65 @@ void try_merge_block(uint16_t header_idx) {
     }
 }
 
-void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
-    Block* first = NA.headers + first_idx;
-    Block* second = NA.headers + second_idx;
+/// Calculates the offset necessary to align `header->ptr` to
+/// `alignof(max_align_t)`. Puts the calculated value in `header->offset`
+///
+/// This is the same alignment that `malloc` ensures:
+/// http://kernel.org/doc/man-pages/online/pages/man3/malloc.3.html
+///
+/// `header` - The header representing the allocation to be aligned
+void align_block(Block* header) {
+    uint8_t diff = (uintptr_t)header->ptr % 8;
+    if (diff != 0) {
+        header->offset = 8 - diff;
+    }
 
-    // Clear the block
-    first->size += second->size;
-    memset(second->ptr, 0, second->size);
+    header->offset = 0;
+}
 
-    // Shift the headers over
-    memmove(second, second + 1, sizeof(Block) * (NA.header_len - second_idx));
-    NA.header_len -= 1;
+void garbage_collect() {
+    // Ensure this goes on the stack
+    char m = 0;
+    char* top_of_stack = &m;
+    // TODO Get bottom of stack (with NA)
+}
+
+// EXPOSED FUNCTIONS
+
+/// Guarantees that the returned block will be zeroed
+// There's an issue where you can just write into another allocation if a larger
+// block is split. I don't exactly know how to make the write fail, not sure if
+// that's what it should do.
+void* allocate(uint32_t size) {
+    for (int i = 0; i < NA.header_len; i++) {
+        Block* header = NA.headers + i;
+
+        if (!header->free || header->size < size)
+            continue;
+
+        align_block(header);
+        header->free = false;
+
+        try_split_block(header, size);
+
+        memset(header->ptr, 0, header->size);
+
+        return header->ptr + header->offset;
+    }
+
+    // TODO Garbage Collect
+    return NULL;
+}
+
+void deallocate(void* ptr) {
+    for (int i = 0; i < NA.header_len; i++) {
+        Block* header = NA.headers + i;
+        if (header->ptr != ptr + header->offset)
+            continue;
+
+        header->free = true;
+        try_merge_block(i);
+
+        break;
+    }
 }
