@@ -1,4 +1,5 @@
 #include "../narsirabad.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -16,13 +17,18 @@ int main() {
 
     deallocate(b);
 
+    // This buffer should represent 4 integers
     int* c = allocate(10);
     if (c == NULL) {
         printf("Failed to allocate block of size %d", 10 * 8);
         exit(1);
     }
     c[1] = 4;
-    c[2] = 6;
-    // Should print 0 4 6 0
-    printf("%d %d %d %d\n", *c, c[1], c[2], c[3]);
+    c[9] = 6;
+    // Should print 0 4 0 6
+    printf("%d %d %d %d\n", *c, c[1], c[2], c[9]);
+
+    deallocate(c);
+
+    assert(b == c);
 }

@@ -8,7 +8,7 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#define NEW_BLOCK_THRESHOLD 128
+#define NEW_BLOCK_THRESHOLD 8
 #define INITIAL_ALLOCATOR_SIZE 128
 #define INITIAL_HEADER_BUFFER_CAPACITY 8
 #define NARSIRABAD_ALLOCATOR NA
@@ -36,13 +36,14 @@ __attribute__((constructor)) void new_allocator() {
     NA.header_len = 1;
 }
 
+/// This destructor will fail if not all blocks have be deallocated
 __attribute__((destructor)) void destroy_allocator() {
     for (int i = 0; i < NA.header_len; i++) {
-        Block* header = NA.headers + i;
-        if (header->ptr == NULL)
+        Block header = NA.headers[i];
+        if (header.ptr == NULL)
             continue;
 
-        int unmap_result = munmap(header->ptr, header->size);
+        int unmap_result = munmap(header.ptr, header.size);
         if (unmap_result == -1) {
             printf("Failed to unnmap block");
             exit(1);
@@ -84,6 +85,7 @@ void deallocate(void* ptr) {
 
         header->free = true;
         try_merge_block(i);
+
         break;
     }
 }
@@ -112,6 +114,8 @@ void try_split_block(Block* header, uint32_t new_size) {
     next_header->free = true;
     next_header->size = remaining;
     next_header->ptr = (void*)((intptr_t)header->ptr + new_size);
+
+    NA.header_len++;
 }
 
 void expand_block_list() {
@@ -126,6 +130,8 @@ void expand_block_list() {
 
     memmove(new_mapping, NA.headers, old_mem_cap);
     munmap(NA.headers, old_mem_cap);
+
+    NA.header_capacity = old_mem_cap * 2;
 }
 
 /// Attempts to merged a free block with adjacent freed memory
@@ -140,16 +146,20 @@ void try_merge_block(uint16_t header_idx) {
     intptr_t end = start + header.size;
 
     for (int i = 0; i < NA.header_len; i++) {
-        intptr_t other_start = (intptr_t)header.ptr;
-        intptr_t other_end = other_start + header.size;
-        // TODO Figure out if we want + 1
-        if (other_start == end + 1) {
+        Block other_header = NA.headers[i];
+        if (!other_header.free)
+            continue;
+
+        intptr_t other_start = (intptr_t)other_header.ptr;
+        intptr_t other_end = other_start + other_header.size;
+
+        if (other_start == end) {
             merge_blocks(header_idx, i);
 
             if (header_idx > i)
                 header_idx--;
             i--;
-        } else if (other_end + 1 == start) {
+        } else if (other_end == start) {
             merge_blocks(i, header_idx);
 
             if (header_idx > i)
@@ -168,6 +178,6 @@ void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
     memset(second->ptr, 0, second->size);
 
     // Shift the headers over
-    memmove(second, second + 1, sizeof(Block));
+    memmove(second, second + 1, sizeof(Block) * (NA.header_len - second_idx));
     NA.header_len -= 1;
 }
