@@ -54,6 +54,9 @@ __attribute__((destructor)) void destroy_allocator() {
 // EXPOSED FUNCTIONS
 
 /// Guarantees that the returned block will be zeroed
+// There's an issue where you can just write into another allocation if a larger
+// block is split. I don't exactly know how to make the write fail, not sure if
+// that's what it should do.
 void* allocate(uint32_t size) {
     for (int i = 0; i < NA.header_len; i++) {
         Block* header = NA.headers + i;
