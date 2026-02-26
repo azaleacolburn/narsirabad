@@ -99,7 +99,7 @@ void try_split_block(Block* header, uint32_t new_size) {
     Block* next_header = NA.headers + NA.header_len;
     next_header->free = true;
     next_header->size = remaining;
-    next_header->ptr = (void*)((intptr_t)header->ptr + new_size);
+    next_header->ptr = (void*)((uintptr_t)header->ptr + new_size);
     next_header->offset = 0;
 
     NA.header_len++;
@@ -126,30 +126,42 @@ void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
 /// and have to allocate new blocks more often.
 void try_merge_block(uint16_t header_idx) {
     Block header = NA.headers[header_idx];
-    intptr_t start = (intptr_t)header.ptr;
-    intptr_t end = start + header.size;
+    uintptr_t start = (uintptr_t)header.ptr;
+    uintptr_t end = start + header.size;
+
+    bool below = false;
+    bool above = false;
 
     for (int i = 0; i < NA.header_len; i++) {
         Block other_header = NA.headers[i];
         if (!other_header.free)
             continue;
 
-        intptr_t other_start = (intptr_t)other_header.ptr;
-        intptr_t other_end = other_start + other_header.size;
+        uintptr_t other_start = (uintptr_t)other_header.ptr;
+        uintptr_t other_end = other_start + other_header.size;
 
+        // TODO
+        // We might also want to recurse whenever we find a new block
+        // To make this more efficient, we should split checking above and below
+        // into two different functions.
         if (other_start == end) {
             merge_blocks(header_idx, i);
 
             if (header_idx > i)
                 header_idx--;
+            below = true;
             i--;
         } else if (other_end == start) {
             merge_blocks(i, header_idx);
 
             if (header_idx > i)
                 header_idx--;
+            above = true;
             i--;
         }
+
+        if (below && above)
+            break;
     }
 }
 
@@ -169,11 +181,37 @@ void align_block(Block* header) {
     header->offset = 0;
 }
 
-/// Finds the block corresponding with the given pointer (the pointer must point
-/// to the beginning of the block)
+/// Allocates a new block of `size`
+/// Expands the header buffer if necessary
 ///
-/// Returns the index of the block in `NA.headers`, or `-1` if it could not be
-/// found
+/// Returns the success value of the new allocation
+/// `true` for success, `false` for failure
+bool expand_memory(uint32_t size) {
+    void* ptr = map_new(size);
+    if (ptr == NULL) {
+        return false;
+    }
+
+    if (NA.header_len == NA.header_capacity) {
+        expand_block_list();
+    }
+
+    Block* new_header = (NA.headers + NA.header_len);
+    new_header->ptr = ptr;
+    new_header->size = size;
+    new_header->free = false;
+    new_header->offset = 0;
+
+    NA.header_len++;
+
+    return true;
+}
+
+/// Finds the block corresponding with the given pointer (the pointer must
+/// point to the beginning of the block)
+///
+/// Returns the index of the block in `NA.headers`, or `-1` if it could not
+/// be found
 int8_t find_corresponding_block(void* ptr) {
     for (int i = 0; i < NA.header_len; i++) {
         Block header = NA.headers[i];
@@ -212,8 +250,8 @@ void mark_used_blocks_by_ptrs_in_buffer(bool used_blocks[NA.header_len],
             continue;
         }
 
-        // TODO
-        // Figure out a way to handle cyclical references
+        if (used_blocks[block_idx])
+            continue;
 
         Block header = NA.headers[block_idx];
         mark_used_blocks_by_ptrs_in_buffer(used_blocks, header.ptr,
@@ -227,24 +265,37 @@ void garbage_collect() {
     // WARNING
     // Horrible hack to get the bounds on the stack
     uintptr_t volatile m = 0;
-    uintptr_t volatile* top_of_stack = &m;
-    uintptr_t* volatile bottom_of_stack = (uintptr_t*)(&NA + 1);
+    uintptr_t* top_of_stack = (uintptr_t*)&m;
+    // This should work, because `Allocator` should be aligned to the maximum
+    // alignment
+    uintptr_t* bottom_of_stack = (uintptr_t*)(&NA + 1);
     uintptr_t* head = bottom_of_stack;
 
     bool used_blocks[NA.header_len];
     memset(used_blocks, 0, NA.header_len);
 
-    mark_used_blocks_by_ptrs_in_buffer(used_blocks, top_of_stack,
-                                       (bottom_of_stack - top_of_stack)/sizeof(intptr_t); // This shouldn't round because it's aligned, I think
+    // This shouldn't round up or down because
+    // it's aligned, I think
+    uint8_t stack_size = (bottom_of_stack - top_of_stack) / sizeof(intptr_t);
+    mark_used_blocks_by_ptrs_in_buffer(used_blocks, top_of_stack, stack_size);
+
+    for (int i = 0; i < NA.header_len; i++) {
+        if (used_blocks[i])
+            continue;
+
+        // TODO
+        // Check if this modified `NA->headers` (it should)
+        NA.headers[i].free = true;
+        NA.headers[i].offset = 0;
+        // TODO
+        // Figure out if it's faster to try merging everything at the end
+        try_merge_block(i);
+    }
 }
 
-// EXPOSED FUNCTIONS
-
-/// Guarantees that the returned block will be zeroed
-// There's an issue where you can just write into another allocation if a larger
-// block is split. I don't exactly know how to make the write fail, not sure if
-// that's what it should do.
-void* allocate(uint32_t size) {
+/// Attempts to perform an allocation
+/// If it fails, it will not garbage collect nor alloate more memory
+void* try_allocate(uint32_t size) {
     for (int i = 0; i < NA.header_len; i++) {
         Block* header = NA.headers + i;
 
@@ -261,8 +312,38 @@ void* allocate(uint32_t size) {
         return header->ptr + header->offset;
     }
 
-    // TODO Garbage Collect
     return NULL;
+}
+
+// EXPOSED FUNCTIONS
+
+/// Guarantees that the returned block will be zeroed
+// There's an issue where you can just write into another allocation if a larger
+// block is split. I don't exactly know how to make the write fail, not sure if
+// that's what it should do.
+void* allocate(uint32_t size) {
+
+    void* ptr = try_allocate(size);
+    if (ptr != NULL)
+        return ptr;
+
+    garbage_collect();
+    ptr = try_allocate(size);
+    if (ptr != NULL) {
+        return ptr;
+    }
+
+    bool expand_success = expand_memory(size);
+    if (!expand_success)
+        return NULL;
+
+    // After expanding, we know that the only
+    // valid header will be the last in the buffer
+    Block* block = NA.headers + NA.header_len - 1;
+    block->free = false;
+    try_split_block(block, size);
+
+    return block->ptr;
 }
 
 void deallocate(void* ptr) {
