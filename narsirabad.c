@@ -186,28 +186,56 @@ int8_t find_corresponding_block(void* ptr) {
     return -1;
 }
 
+/// Marks every block that holds a pointer to an allocation owned by `NA` as
+/// used, if that pointer is found in the current buffer.
+///
+/// For every pointer found this way, the function recurses on the buffer that
+/// pointer points to, taking the `size` of this sub-buffer from the header
+/// corresponding to the parent pointer (`header->size`).
+///
+/// The marking algorithm over a single buffer has time complexity:
+/// O(`size` * `NA.header_len`)
+///
+/// This function has the potential to recure indefinitely at the moment if a
+/// cyclical reference is encountered.
+///
+/// `used_blocks` - The array in which to store whether a block is alive.
+///     The indicies of the array should correspond to the indicies of the
+///     headers in `NA`
+/// `buf` - The buffer in which to search for pointers
+/// `size` - The number of potential pointers in `buf`
+void mark_used_blocks_by_ptrs_in_buffer(bool used_blocks[NA.header_len],
+                                        uintptr_t* buf, size_t size) {
+    for (int i = 0; i < size; i++) {
+        int8_t block_idx = find_corresponding_block((void*)buf[i]);
+        if (block_idx == -1) {
+            continue;
+        }
+
+        // TODO
+        // Figure out a way to handle cyclical references
+
+        Block header = NA.headers[block_idx];
+        mark_used_blocks_by_ptrs_in_buffer(used_blocks, header.ptr,
+                                           header.size);
+
+        used_blocks[block_idx] = true;
+    }
+}
+
 void garbage_collect() {
-    // Ensure this goes on the stack
+    // WARNING
+    // Horrible hack to get the bounds on the stack
     uintptr_t volatile m = 0;
     uintptr_t volatile* top_of_stack = &m;
-    // TODO Get bottom of stack (with NA)
     uintptr_t* volatile bottom_of_stack = (uintptr_t*)(&NA + 1);
     uintptr_t* head = bottom_of_stack;
 
     bool used_blocks[NA.header_len];
     memset(used_blocks, 0, NA.header_len);
 
-    // O(hn) where h is the height of the stack and n is the number of
-    // elements allocated
-    while (head < top_of_stack) {
-        // Check if the value is a pointer represented by one of our headers
-        int8_t block_idx = find_corresponding_block((void*)*head);
-        if (block_idx == -1) {
-            continue;
-        }
-
-        used_blocks[block_idx] = true;
-    }
+    mark_used_blocks_by_ptrs_in_buffer(used_blocks, top_of_stack,
+                                       (bottom_of_stack - top_of_stack)/sizeof(intptr_t); // This shouldn't round because it's aligned, I think
 }
 
 // EXPOSED FUNCTIONS
