@@ -169,11 +169,45 @@ void align_block(Block* header) {
     header->offset = 0;
 }
 
+/// Finds the block corresponding with the given pointer (the pointer must point
+/// to the beginning of the block)
+///
+/// Returns the index of the block in `NA.headers`, or `-1` if it could not be
+/// found
+int8_t find_corresponding_block(void* ptr) {
+    for (int i = 0; i < NA.header_len; i++) {
+        Block header = NA.headers[i];
+
+        if (header.ptr + header.offset == ptr) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
 void garbage_collect() {
     // Ensure this goes on the stack
-    char m = 0;
-    char* top_of_stack = &m;
+    uintptr_t volatile m = 0;
+    uintptr_t volatile* top_of_stack = &m;
     // TODO Get bottom of stack (with NA)
+    uintptr_t* volatile bottom_of_stack = (uintptr_t*)(&NA + 1);
+    uintptr_t* head = bottom_of_stack;
+
+    bool used_blocks[NA.header_len];
+    memset(used_blocks, 0, NA.header_len);
+
+    // O(hn) where h is the height of the stack and n is the number of
+    // elements allocated
+    while (head < top_of_stack) {
+        // Check if the value is a pointer represented by one of our headers
+        int8_t block_idx = find_corresponding_block((void*)*head);
+        if (block_idx == -1) {
+            continue;
+        }
+
+        used_blocks[block_idx] = true;
+    }
 }
 
 // EXPOSED FUNCTIONS
