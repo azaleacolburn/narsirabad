@@ -17,13 +17,14 @@
 // CONSTANTS
 Allocator NARSIRABAD_ALLOCATOR;
 
-uintptr_t bottom_of_stack;
-uintptr_t top_of_stack;
-
-extern char* __bss_start__ =.;
+extern char __bss_start__;
+extern char __bss_end__;
 
 uintptr_t bottom_of_bss;
 uintptr_t top_of_bss;
+
+uintptr_t bottom_of_stack;
+uintptr_t top_of_stack;
 
 __attribute__((constructor)) void new_allocator() {
     NA.headers = map_new(INITIAL_HEADER_BUFFER_CAPACITY);
