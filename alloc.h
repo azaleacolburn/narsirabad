@@ -1,6 +1,6 @@
-#ifndef NARSIRABAD
+#ifndef NARSIRABAD_ALLOC
 
-#define NARSIRABAD
+#define NARSIRABAD_ALLOC
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -16,8 +16,8 @@ typedef struct Block {
 typedef struct Allocator {
     Block* headers;
     // These are counts of block, not amount of memory remaining
-    size_t header_len;
-    size_t header_capacity;
+    uint32_t header_len;
+    uint32_t header_capacity;
 } Allocator;
 
 void* allocate(uint32_t size);
