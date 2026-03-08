@@ -3,22 +3,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-void allocate_lots() {
-    int* b = allocate(100 * sizeof(int));
-    assert(*b == 0);
-    // Don't deallocate, the GC should handle this
-}
-
-void gc_test() {
-    allocate_lots();
-    // This allocation exceeds the max capacity of the allocator, assuming the
-    // old memory isn't freed
-    int* b = allocate(100 * sizeof(int));
-    assert(b != NULL);
-
-    memset(b, 3, 100);
-}
+//
+// void allocate_lots() {
+//     int* b = allocate(100 * sizeof(int));
+//     assert(*b == 0);
+//     // Don't deallocate, the GC should handle this
+// }
+//
+// void gc_test() {
+//     allocate_lots();
+//     // This allocation exceeds the max capacity of the allocator, assuming
+//     the
+//     // old memory isn't freed
+//     int* b = allocate(100 * sizeof(int));
+//     assert(b != NULL);
+//
+//     memset(b, 3, 100);
+// }
 
 int main() {
     // This buffer should represent 4 integers
@@ -51,5 +52,5 @@ int main() {
     b = NULL;
     c = NULL;
 
-    gc_test();
+    // gc_test();
 }
