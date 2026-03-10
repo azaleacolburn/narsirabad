@@ -18,11 +18,11 @@
 
 Allocator NARSIRABAD_ALLOCATOR;
 
-extern char __bss_start__;
-extern char __bss_end__;
+extern char __bss_start;
+extern char __data_start;
 
-uintptr_t bottom_of_bss;
-uintptr_t top_of_bss;
+uintptr_t end_of_bss;
+uintptr_t start_of_bss;
 
 uintptr_t bottom_of_stack;
 uintptr_t top_of_stack;
@@ -239,6 +239,10 @@ __attribute__((constructor)) void new_allocator() {
     NA.header_len = 1;
 
     bottom_of_stack = (uintptr_t)__builtin_stack_address();
+
+    // TODO Verify that they're contiguous in memory
+    start_of_bss = (uintptr_t)&__bss_start;
+    end_of_bss = (uintptr_t)&__data_start;
 }
 
 /// This destructor will fail if not all blocks have be deallocated

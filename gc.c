@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
 
 #define NA NARSIRABAD_ALLOCATOR
 
@@ -11,8 +12,8 @@ extern Allocator NARSIRABAD_ALLOCATOR;
 extern uintptr_t top_of_stack;
 extern uintptr_t bottom_of_stack;
 
-extern uintptr_t bottom_of_bss;
-extern uintptr_t top_of_bss;
+extern uintptr_t start_of_bss;
+extern uintptr_t end_of_bss;
 
 /*
  * Finds the block corresponding with the given pointer (the pointer must
@@ -104,9 +105,8 @@ void mark_stack(bool used_blocks[NA.header_len]) {
     /// The number of pointers that can exist in the current buffer
     /// Rounded down because the top the the stack might not be aligned to
     /// `8`, but the bottom will be
-    uint8_t stack_size =
-        ((uintptr_t)bottom_of_stack - (uintptr_t)top_of_stack) /
-        sizeof(uintptr_t);
+    size_t stack_size = ((uintptr_t)bottom_of_stack - (uintptr_t)top_of_stack) /
+                        sizeof(uintptr_t);
     // printf("stack size: %d\ntos: %po\n", stack_size, (void*)top_of_stack);
     mark_used_blocks_by_ptrs_in_buffer(used_blocks, (uintptr_t*)top_of_stack,
                                        stack_size);
@@ -114,24 +114,77 @@ void mark_stack(bool used_blocks[NA.header_len]) {
 
 // TODO
 // Implement searching and marking through other sections
-void mark_bss(bool used_blocks[NA.header_len]) {}
+void mark_bss(bool used_blocks[NA.header_len]) {
+    // NOTE
+    // No need to align the bottom of the bss
+    // I think?
 
-void mark_registers(bool used_blocks[NA.header_len]) {}
+    // TODO Verify that this is correct
+    assert(start_of_bss > end_of_bss);
+
+    printf("Start of .BSS: %po\n  End of .BSS: %po\n\n", (void*)start_of_bss,
+           (void*)end_of_bss);
+
+    size_t stack_size = start_of_bss - end_of_bss;
+
+    mark_used_blocks_by_ptrs_in_buffer(used_blocks, (uintptr_t*)start_of_bss,
+                                       stack_size);
+}
+
+// uint64_t reg;
+// asm volatile("mov %0, " #r : "=r"(reg));
+
+/*
+ * Loops through the registers the system will likely be using, marking all the
+ pointers found in both those registers and the `NARSIRABAD_ALLOCATOR`
+ *
+ * List of registers:
+ * https://cs.brown.edu/courses/cs033/docs/guides/x64_cheatsheet.pdf
+ *
+ *
+ * We are not checking the following registers:
+ * - `rax`: Return Value
+ * - `rsp`: Stack Pointer
+ * - `rbp`: Stack Frame Base Pointer
+ *
+ * This has to be a macro, because the assembly code has to be generated at
+ * compile time.
+ */
+void mark_registers(bool used_blocks[NA.header_len]) {
+
+// TODO
+// Maybe move this to the top of the file
+#define CHECK_REG(r)                                                           \
+    {                                                                          \
+        register register_t v asm(#r);                                         \
+        int8_t block_number = find_corresponding_block((void*)v);              \
+        if (block_number != -1) {                                              \
+            used_blocks[block_number] = true;                                  \
+        }                                                                      \
+    }
+
+    CHECK_REG(rcx);
+    CHECK_REG(rsi);
+    CHECK_REG(rdi);
+    CHECK_REG(r8);
+    CHECK_REG(r9);
+    CHECK_REG(r10);
+    CHECK_REG(r11);
+    CHECK_REG(r12);
+    CHECK_REG(r13);
+    CHECK_REG(r14);
+    CHECK_REG(r15);
+}
 
 void sweep(bool used_blocks[NA.header_len]) {
     for (int i = 0; i < NA.header_len; i++) {
         if (used_blocks[i])
             continue;
 
-        // TODO
-        // Check if this modified `NA->headers` (it should)
         Block* header = NA.headers + i;
         header->free = true;
         header->size += header->offset;
         header->offset = 0;
-        // TODO
-        // Merge everything at the end instead
-        // try_merge_block(i);
     }
 }
 
@@ -145,6 +198,8 @@ void garbage_collect() {
     memset(used_blocks, 0, NA.header_len);
 
     mark_stack(used_blocks);
+    mark_bss(used_blocks);
+    mark_registers(used_blocks);
 
     sweep(used_blocks);
 }
