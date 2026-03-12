@@ -36,6 +36,8 @@ typedef struct Allocator {
     BlockRefList used_headers;
 } Allocator;
 
+bool is_free(Block* header);
+
 void* allocate(uint32_t size);
 
 void deallocate(void* ptr);

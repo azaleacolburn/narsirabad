@@ -14,9 +14,11 @@ void BL_push(BlockList* list, Block block);
 
 Block* BL_idx(BlockList* list, size_t idx);
 
-void BL_find_remove(BlockList* list, Block value);
+void BL_find_remove(BlockList* list, Block* value);
 
 void BL_remove(BlockList* list, size_t idx);
+
+void BL_free(BlockList* list);
 
 /*
  * `BlockRefList` functions
@@ -35,5 +37,7 @@ int BRL_find(BlockRefList* list, Block* block);
 void BRL_remove(BlockRefList* list, size_t idx);
 
 void BRL_find_remove(BlockRefList* list, Block* value);
+
+void BRL_free(BlockRefList* list);
 
 #endif

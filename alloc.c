@@ -39,7 +39,8 @@ void print_headers() {
                header->size, header->offset);
     }
 
-    printf("Used Headers:\n");
+    if (NA.used_headers.len > 0)
+        printf("Used Headers:\n");
     for (int i = 0; i < NA.used_headers.len; i++) {
         Block* header = BRL_idx(&NA.used_headers, i);
 
@@ -68,7 +69,7 @@ void new_free_header(void* ptr, size_t size) {
  * `header->offset` before calling this function.
  */
 Block* try_split_block(uint32_t block_idx, uint32_t new_size) {
-    Block* header = BL_idx(&NA.headers, block_idx);
+    Block* header = BRL_idx(&NA.free_headers, block_idx);
     // We have to save the pointer
     // because `header` will become invalid if we expand the block list
     uintptr_t ptr = (uintptr_t)header->ptr;
@@ -80,29 +81,30 @@ Block* try_split_block(uint32_t block_idx, uint32_t new_size) {
 
     // Shrink old header
     header->size = new_size;
-
-    // uint16_t remaining_in_block_list = NA.headers.cap - NA.headers.cap;
-    // assert(remaining_in_block_list >= 0);
-
-    // if (remaining_in_block_list == 0) {
-    //     expand_block_list();
-    // }
-
+    // Create new header
     new_free_header((void*)(ptr + new_size), remaining);
 
-    return BL_idx(&NA.headers, block_idx);
+    return BRL_idx(&NA.free_headers, block_idx);
 }
 
+/*
+ * Merges two headers that point to adjacent data into one header of combined
+ * size.
+ *
+ * `first_idx` - The index of the first block (by pointer) in the
+ * `NA.free_headers` list. `second` - The index of the second block (by pointer)
+ * in the `NA.free_headers` list.
+ */
 void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
     Block* first = BL_idx(&NA.headers, first_idx);
     Block* second = BL_idx(&NA.headers, second_idx);
 
-    // Clear the block
+    // Expand the first block
     first->size += second->size + second->offset;
 
-    BL_remove(&NA.headers, first_idx);
-
-    BRL_find_remove(&NA.free_headers, first);
+    // Clear the old block
+    BL_find_remove(&NA.headers, second);
+    BRL_remove(&NA.free_headers, second_idx);
 }
 
 bool is_free(Block* header) { return BRL_find(&NA.free_headers, header) != -1; }
@@ -121,18 +123,12 @@ void try_merge_block(uint16_t header_idx) {
     bool below = false;
     bool above = false;
 
-    for (int i = 0; i < NA.headers.len; i++) {
-        Block* other_header = BL_idx(&NA.headers, i);
-        if (is_free(other_header))
-            continue;
+    for (int i = 0; i < NA.free_headers.len; i++) {
+        Block* other_header = BRL_idx(&NA.free_headers, i);
 
         uintptr_t other_start = (uintptr_t)other_header->ptr;
         uintptr_t other_end = other_start + other_header->size;
 
-        // TODO
-        // We might also want to recurse whenever we find a new block
-        // To make this more efficient, we should split checking above and below
-        // into two different functions.
         if (other_start == end) {
             merge_blocks(header_idx, i);
 
@@ -155,7 +151,7 @@ void try_merge_block(uint16_t header_idx) {
 }
 
 void try_merge_all_blocks() {
-    for (int i = 0; i < NA.headers.len; i++) {
+    for (int i = 0; i < NA.free_headers.len; i++) {
         try_merge_block(i);
     }
 }
@@ -175,6 +171,21 @@ void align_block(Block* header) {
     }
 
     header->offset = 0;
+}
+
+// TODO
+// Maybe realign here
+void use_block(Block* block) {
+    BRL_find_remove(&NA.free_headers, block);
+    BRL_push(&NA.used_headers, block);
+}
+
+void free_block(Block* block) {
+    BRL_find_remove(&NA.used_headers, block);
+    BRL_push(&NA.free_headers, block);
+
+    block->size += block->offset;
+    block->offset = 0;
 }
 
 /// Allocates a new block of `size`
@@ -199,17 +210,15 @@ bool expand_memory(uint32_t size) {
 void* try_allocate(uint32_t size) {
     printf("Trying to allocate: %d\n", size);
     print_headers();
-    for (int i = 0; i < NA.headers.len; i++) {
-        Block* header = BL_idx(&NA.headers, i);
+    for (int i = 0; i < NA.free_headers.len; i++) {
+        Block* header = BRL_idx(&NA.free_headers, i);
 
-        if (!is_free(header) || header->size < size)
+        if (header->size < size)
             continue;
 
         align_block(header);
 
-        BRL_find_remove(&NA.used_headers, header);
-        BRL_push(&NA.free_headers, header);
-
+        use_block(header);
         // We have to assign here, because our pointer could become invalid if
         // `NA.headers` is reallocated
         header = try_split_block(i, size);
@@ -225,13 +234,18 @@ void* try_allocate(uint32_t size) {
 __attribute__((constructor)) void new_allocator() {
     NA.headers = BL_new(INITIAL_HEADER_BUFFER_CAPACITY);
 
+    NA.free_headers = BRL_new(INITIAL_HEADER_BUFFER_CAPACITY);
+    NA.used_headers = BRL_new(INITIAL_HEADER_BUFFER_CAPACITY);
+
     void* ptr = map_new(INITIAL_ALLOCATOR_SIZE);
     if (ptr == NULL) {
         printf("Failed to allocate first block of allocator\n");
         exit(1);
     }
 
-    BL_new_header(&NA.headers, INITIAL_ALLOCATOR_SIZE, ptr);
+    Block* first_header =
+        BL_new_header(&NA.headers, INITIAL_ALLOCATOR_SIZE, ptr);
+    BRL_push(&NA.free_headers, first_header);
 
     bottom_of_stack = (uintptr_t)__builtin_stack_address();
 
@@ -239,36 +253,35 @@ __attribute__((constructor)) void new_allocator() {
     start_of_bss = (uintptr_t)&__bss_start;
     end_of_bss = (uintptr_t)&__data_start;
 }
-
 /// This destructor will fail if not all blocks have be deallocated
 __attribute__((destructor)) void destroy_allocator() {
-    // We must first deallocate and merge blocks
-    // because otherwise we would unmap blocks that were split from mappings
-    // (which wouldn't be legal)
-    //
-    // But we can't just unmmap the first block, because there might be multiple
-    // non-contiguous mappingr across all the headers
-    for (int i = 0; i < NA.header_len; i++) {
-        Block* header = &NA.headers[i];
-        assert(header->ptr != NULL);
+    for (int i = 0; i < NA.used_headers.len; i++) {
+        Block* block = BRL_idx(&NA.used_headers, i);
 
-        header->free = true;
-        header->size += header->offset;
-        header->offset = 0;
+        // We don't want to call free_block, because then we would traverse the
+        // `NA.used_headers` to remove it, instead of just freeing the whole
+        // array at the end
+        BRL_push(&NA.free_headers, block);
+
+        block->size += block->offset;
+        block->offset = 0;
     }
+    BRL_free(&NA.used_headers);
+
     try_merge_all_blocks();
 
-    for (int i = 0; i < NA.header_len; i++) {
-        Block header = NA.headers[i];
-        assert(header.ptr != NULL);
+    for (int i = 0; i < NA.headers.len; i++) {
+        Block* header = BL_idx(&NA.headers, i);
+        assert(header->ptr != NULL);
 
-        int unmap_result = munmap(header.ptr, header.size + header.offset);
+        int unmap_result = munmap(header->ptr, header->size + header->offset);
         if (unmap_result == -1) {
             printf("Failed to unnmap block\n");
             exit(1);
         }
     }
-    munmap(NA.headers, NA.header_capacity);
+
+    BL_free(&NA.headers);
 }
 
 // EXPOSED FUNCTIONS
@@ -308,25 +321,25 @@ void* allocate(uint32_t size) {
     bool expand_success = expand_memory(size);
     if (!expand_success)
         return NULL;
-
     printf("Post expansion\n");
 
-    // After expanding, we know that the only
-    // valid header will be the last in the buffer
-    Block* block = NA.headers + NA.header_len - 1;
-    block->free = false;
-    try_split_block(NA.header_len - 1, size);
+    Block* block = BRL_idx(&NA.used_headers, NA.used_headers.len - 1);
+
+    try_split_block(NA.used_headers.len - 1, size);
 
     return block->ptr;
 }
 
 void deallocate(void* ptr) {
-    for (int i = 0; i < NA.header_len; i++) {
-        Block* header = NA.headers + i;
+    printf("Deallocating:\n");
+    print_headers();
+
+    for (int i = 0; i < NA.used_headers.len; i++) {
+        Block* header = BL_idx(&NA.headers, i);
         if (header->ptr != (uint8_t*)ptr + header->offset)
             continue;
 
-        header->free = true;
+        free_block(header);
         try_merge_block(i);
 
         break;

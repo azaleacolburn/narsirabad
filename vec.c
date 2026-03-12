@@ -13,7 +13,7 @@
                                                                                \
         outer_type list;                                                       \
         list.arr = mapping;                                                    \
-        list.len = 1;                                                          \
+        list.len = 0;                                                          \
         list.cap = initial_capacity;                                           \
                                                                                \
         return list;                                                           \
@@ -67,22 +67,22 @@
         list->cap = 0;                                                         \
     }
 
-VEC_GEN_new(BL_new, BlockList, Block);
-VEC_GEN_realloc(BL_realloc, BlockList, Block);
-VEC_GEN_idx(BL_idx, BlockList, &);
-VEC_GEN_remove(BL_remove, BlockList, Block);
-VEC_GEN_free(BL_free, BlockList, Block);
+VEC_GEN_new(BL_new, BlockList, Block)
+    VEC_GEN_realloc(BL_realloc, BlockList, Block)
+        VEC_GEN_idx(BL_idx, BlockList, &)
+            VEC_GEN_remove(BL_remove, BlockList, Block)
+                VEC_GEN_free(BL_free, BlockList, Block)
 
-VEC_GEN_new(BRL_new, BlockRefList, Block*);
-VEC_GEN_realloc(BRL_realloc, BlockRefList, Block*);
-VEC_GEN_idx(BRL_idx, BlockRefList, );
-VEC_GEN_remove(BRL_remove, BlockRefList, Block*);
-VEC_GEN_free(BRL_free, BlockList, Block);
+                    VEC_GEN_new(BRL_new, BlockRefList, Block*)
+                        VEC_GEN_realloc(BRL_realloc, BlockRefList, Block*)
+                            VEC_GEN_idx(BRL_idx, BlockRefList, )
+                                VEC_GEN_remove(BRL_remove, BlockRefList, Block*)
+                                    VEC_GEN_free(BRL_free, BlockRefList, Block*)
 
-// NOTE
-// This function exists because otherwise we'd have to create a `Block`
-// then pass it into the push function, which is slow
-Block* BL_new_header(BlockList* list, size_t size, void* ptr) {
+    // NOTE
+    // This function exists because otherwise we'd have to create a `Block`
+    // then pass it into the push function, which is slow
+    Block* BL_new_header(BlockList* list, size_t size, void* ptr) {
     if (list->len == list->cap) {
         BL_realloc(list, list->cap * 2);
     }
@@ -107,8 +107,27 @@ void BL_push(BlockList* list, Block block) {
         BL_realloc(list, list->cap * 2);
     }
 
-    list->arr[list->len] = block;
-    list->len++;
+    list->arr[list->len++] = block;
+}
+
+int BL_find(BlockList* list, Block* block) {
+    int idx = 0;
+    while (idx < list->len) {
+        if (list->arr + idx == block)
+            break;
+
+        idx++;
+    }
+
+    return idx;
+}
+
+void BL_find_remove(BlockList* list, Block* block) {
+    int idx = BL_find(list, block);
+    if (idx == -1)
+        return;
+
+    BL_remove(list, idx);
 }
 
 void BRL_push(BlockRefList* list, Block* block) {
@@ -116,8 +135,7 @@ void BRL_push(BlockRefList* list, Block* block) {
         BRL_realloc(list, list->cap * 2);
     }
 
-    list->arr[list->len] = block;
-    list->len++;
+    list->arr[list->len++] = block;
 }
 
 int BRL_find(BlockRefList* list, Block* block) {

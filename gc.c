@@ -1,4 +1,5 @@
 #include "alloc.h"
+#include "vec.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -22,8 +23,8 @@ extern uintptr_t end_of_bss;
  * be found
  */
 int8_t find_corresponding_block(void* ptr) {
-    for (int i = 0; i < NA.header_len; i++) {
-        Block header = NA.headers[i];
+    for (int i = 0; i < NA.headers.len; i++) {
+        Block header = *BL_idx(&NA.headers, i);
 
         if ((uint8_t*)header.ptr + header.offset == ptr) {
             return i;
@@ -53,7 +54,7 @@ int8_t find_corresponding_block(void* ptr) {
  * `buf` - The buffer in which to search for pointers
  * `size` - The number of potential pointers in `buf`
  */
-void mark_used_blocks_by_ptrs_in_buffer(bool used_blocks[NA.header_len],
+void mark_used_blocks_by_ptrs_in_buffer(bool used_blocks[NA.headers.len],
                                         uintptr_t* buf, size_t size) {
     // TODO
     // One problem we have here is that we don't know whether the buffer grows
@@ -73,13 +74,14 @@ void mark_used_blocks_by_ptrs_in_buffer(bool used_blocks[NA.header_len],
         if (block_idx == -1)
             continue;
 
-        if (NA.headers[block_idx].free)
+        Block* ptr = BL_idx(&NA.headers, block_idx);
+        if (is_free(ptr))
             continue;
 
         if (used_blocks[block_idx])
             continue;
 
-        Block header = NA.headers[block_idx];
+        Block header = *BL_idx(&NA.headers, block_idx);
         mark_used_blocks_by_ptrs_in_buffer(used_blocks, header.ptr,
                                            header.size);
 
@@ -87,7 +89,7 @@ void mark_used_blocks_by_ptrs_in_buffer(bool used_blocks[NA.header_len],
     }
 }
 
-void mark_stack(bool used_blocks[NA.header_len]) {
+void mark_stack(bool used_blocks[NA.headers.len]) {
     // Align `top_of_stack` to `8`
     uintptr_t diff = (uintptr_t)top_of_stack % 8;
     if (diff != 0) {
@@ -108,7 +110,7 @@ void mark_stack(bool used_blocks[NA.header_len]) {
 
 // TODO
 // Implement searching and marking through other sections
-void mark_bss(bool used_blocks[NA.header_len]) {
+void mark_bss(bool used_blocks[NA.headers.len]) {
     // NOTE
     // No need to align the bottom of the bss
     // I think?
@@ -139,7 +141,7 @@ void mark_bss(bool used_blocks[NA.header_len]) {
  * This has to be a macro, because the assembly code has to be generated at
  * compile time.
  */
-void mark_registers(bool used_blocks[NA.header_len]) {
+void mark_registers(bool used_blocks[NA.headers.len]) {
 
 // TODO
 // Maybe move this to the top of the file
@@ -166,15 +168,19 @@ void mark_registers(bool used_blocks[NA.header_len]) {
     CHECK_REG(r15)
 }
 
-void sweep(bool used_blocks[NA.header_len]) {
-    for (int i = 0; i < NA.header_len; i++) {
+void sweep(bool used_blocks[NA.headers.len]) {
+    for (int i = 0; i < NA.headers.len; i++) {
         if (used_blocks[i])
             continue;
 
-        Block* header = NA.headers + i;
-        header->free = true;
+        // Equivalent to `free_block(header)`
+        Block* header = BL_idx(&NA.headers, i);
+
         header->size += header->offset;
         header->offset = 0;
+
+        BRL_push(&NA.free_headers, header);
+        BRL_find_remove(&NA.used_headers, header);
     }
 }
 
@@ -184,8 +190,8 @@ void sweep(bool used_blocks[NA.header_len]) {
 // Also, they could modify their pointer with the intention of obfuscating it
 // from us, we're not going to worry about this case
 void garbage_collect() {
-    bool used_blocks[NA.header_len];
-    memset(used_blocks, 0, NA.header_len);
+    bool used_blocks[NA.headers.len];
+    memset(used_blocks, 0, NA.headers.len);
 
     mark_stack(used_blocks);
     mark_bss(used_blocks);
