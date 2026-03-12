@@ -67,17 +67,17 @@ void mark_used_blocks_by_ptrs_in_buffer(bool used_blocks[NA.header_len],
     //
     // What if we encounted dangling pointers on old stack frames?
     // We might accidently have false negatives
+
     for (int i = 0; i < size; i++) {
         int8_t block_idx = find_corresponding_block((void*)buf[i]);
-        if (block_idx == -1 && !NA.headers[block_idx].free) {
+        if (block_idx == -1)
             continue;
-        }
 
-        printf("FOUND ALLOCATED POINTER\n");
-
-        if (used_blocks[block_idx]) {
+        if (NA.headers[block_idx].free)
             continue;
-        }
+
+        if (used_blocks[block_idx])
+            continue;
 
         Block header = NA.headers[block_idx];
         mark_used_blocks_by_ptrs_in_buffer(used_blocks, header.ptr,
@@ -88,12 +88,7 @@ void mark_used_blocks_by_ptrs_in_buffer(bool used_blocks[NA.header_len],
 }
 
 void mark_stack(bool used_blocks[NA.header_len]) {
-    // WARNING
-    // Horrible hack to get the bounds on the stack
-    // This relies on programs pre-allocating the stack
-    // We might have to worry about the dead zone here
-
-    // Align `top_of_stack` to 8
+    // Align `top_of_stack` to `8`
     uintptr_t diff = (uintptr_t)top_of_stack % 8;
     if (diff != 0) {
         top_of_stack += 8 - diff;
@@ -107,7 +102,6 @@ void mark_stack(bool used_blocks[NA.header_len]) {
     /// `8`, but the bottom will be
     size_t stack_size = ((uintptr_t)bottom_of_stack - (uintptr_t)top_of_stack) /
                         sizeof(uintptr_t);
-    // printf("stack size: %d\ntos: %po\n", stack_size, (void*)top_of_stack);
     mark_used_blocks_by_ptrs_in_buffer(used_blocks, (uintptr_t*)top_of_stack,
                                        stack_size);
 }
@@ -122,17 +116,13 @@ void mark_bss(bool used_blocks[NA.header_len]) {
     // TODO Verify that this is correct
     assert(start_of_bss > end_of_bss);
 
-    printf("Start of .BSS: %po\n  End of .BSS: %po\n\n", (void*)start_of_bss,
-           (void*)end_of_bss);
+    // printf("Start of .BSS: %po\n  End of .BSS: %po\n\n", (void*)start_of_bss,
+    //        (void*)end_of_bss);
 
     size_t stack_size = start_of_bss - end_of_bss;
-
-    mark_used_blocks_by_ptrs_in_buffer(used_blocks, (uintptr_t*)start_of_bss,
+    mark_used_blocks_by_ptrs_in_buffer(used_blocks, (uintptr_t*)end_of_bss,
                                        stack_size);
 }
-
-// uint64_t reg;
-// asm volatile("mov %0, " #r : "=r"(reg));
 
 /*
  * Loops through the registers the system will likely be using, marking all the
@@ -143,7 +133,6 @@ void mark_bss(bool used_blocks[NA.header_len]) {
  *
  *
  * We are not checking the following registers:
- * - `rax`: Return Value
  * - `rsp`: Stack Pointer
  * - `rbp`: Stack Frame Base Pointer
  *
@@ -163,17 +152,18 @@ void mark_registers(bool used_blocks[NA.header_len]) {
         }                                                                      \
     }
 
-    CHECK_REG(rcx);
-    CHECK_REG(rsi);
-    CHECK_REG(rdi);
-    CHECK_REG(r8);
-    CHECK_REG(r9);
-    CHECK_REG(r10);
-    CHECK_REG(r11);
-    CHECK_REG(r12);
-    CHECK_REG(r13);
-    CHECK_REG(r14);
-    CHECK_REG(r15);
+    CHECK_REG(rax)
+    CHECK_REG(rcx)
+    CHECK_REG(rsi)
+    CHECK_REG(rdi)
+    CHECK_REG(r8)
+    CHECK_REG(r9)
+    CHECK_REG(r10)
+    CHECK_REG(r11)
+    CHECK_REG(r12)
+    CHECK_REG(r13)
+    CHECK_REG(r14)
+    CHECK_REG(r15)
 }
 
 void sweep(bool used_blocks[NA.header_len]) {

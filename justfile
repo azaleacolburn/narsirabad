@@ -1,8 +1,19 @@
 build:
     cc test/main.c alloc.c gc.c mem.c -o target/main -Wall -Werror -Wpedantic
+    cc test/fuzzy.c alloc.c gc.c mem.c -o target/fuzzy -Wall -Werror -Wpedantic
+
+test-main:
+    ./target/main
+
+test-fuzz:
+    ./target/fuzzy
+
 
 test:
     ./target/main
+    ./target/fuzzy
+
+
 
 build-prod:
     mkdir export

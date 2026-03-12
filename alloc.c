@@ -1,6 +1,7 @@
 #include "alloc.h"
 #include "gc.h"
 #include "mem.h"
+#include "vec.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -30,75 +31,81 @@ uintptr_t top_of_stack;
 // Internal functions
 
 void print_headers() {
-    for (int i = 0; i < NA.header_len; i++) {
-        Block header = NA.headers[i];
-        printf("{ ptr: %po; size: %lu; offset: %d; free: %d }\n", header.ptr,
-               header.size, header.offset, header.free);
+    printf("Free Headers:\n");
+    for (int i = 0; i < NA.free_headers.len; i++) {
+        Block* header = BRL_idx(&NA.free_headers, i);
+
+        printf("\t{ ptr: %po; size: %lu; offset: %d }\n", header->ptr,
+               header->size, header->offset);
     }
+
+    printf("Used Headers:\n");
+    for (int i = 0; i < NA.used_headers.len; i++) {
+        Block* header = BRL_idx(&NA.used_headers, i);
+
+        printf("\t{ ptr: %po; size: %lu; offset: %d }\n", header->ptr,
+               header->size, header->offset);
+    }
+
     puts("");
 }
 
-void expand_block_list() {
-    int old_mem_cap = NA.header_capacity * sizeof(Block);
-
-    void* in_place_mapping = map_fixed(NA.headers, old_mem_cap * 2);
-    if (in_place_mapping != NULL) {
-        return;
-    }
-
-    Block* new_mapping = map_new(old_mem_cap * 2);
-
-    memmove(new_mapping, NA.headers, old_mem_cap);
-    munmap(NA.headers, old_mem_cap);
-
-    NA.header_capacity = old_mem_cap * 2;
+void new_free_header(void* ptr, size_t size) {
+    // These will automatically expand the lists
+    Block* header = BL_new_header(&NA.headers, size, ptr);
+    BRL_push(&NA.free_headers, header);
 }
 
-/// Attempts to split a freshly allocated block
-///
-/// header - The header of the block you wish to split.
-/// new_size - The new size of the allocation, does not include the offset
-///     If you wish to include the offset, it should be set in `header->offset`
-///     before calling this function.
-void try_split_block(Block* header, uint32_t new_size) {
-    int remaining = header->size - new_size - header->offset;
+/*
+ * Attempts to split a freshly allocated block.
+ *
+ * Returns the address of the first part of the block. If the block list is
+ * not reallocated, it will be equal to `header`.
+ *
+ * `header` - The header of the block you wish to split.
+ * `new_size` - The new size of the allocation, does not include the offset
+ *     If you wish to include the offset, it should be set in
+ * `header->offset` before calling this function.
+ */
+Block* try_split_block(uint32_t block_idx, uint32_t new_size) {
+    Block* header = BL_idx(&NA.headers, block_idx);
+    // We have to save the pointer
+    // because `header` will become invalid if we expand the block list
+    uintptr_t ptr = (uintptr_t)header->ptr;
+
+    uint32_t remaining = header->size - new_size - header->offset;
     if (remaining <= NEW_BLOCK_THRESHOLD) {
-        return;
+        return header;
     }
 
     // Shrink old header
     header->size = new_size;
 
-    // Put new header in NA's block list
-    int remaining_in_block_list = NA.header_capacity - NA.header_len;
-    assert(remaining_in_block_list >= 0);
+    // uint16_t remaining_in_block_list = NA.headers.cap - NA.headers.cap;
+    // assert(remaining_in_block_list >= 0);
 
-    if (remaining_in_block_list == 0) {
-        expand_block_list();
-    }
+    // if (remaining_in_block_list == 0) {
+    //     expand_block_list();
+    // }
 
-    // Create new header
-    Block* next_header = NA.headers + NA.header_len;
-    next_header->free = true;
-    next_header->size = remaining;
-    next_header->ptr = (void*)((uintptr_t)header->ptr + new_size);
-    next_header->offset = 0;
+    new_free_header((void*)(ptr + new_size), remaining);
 
-    NA.header_len++;
+    return BL_idx(&NA.headers, block_idx);
 }
 
 void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
-    Block* first = NA.headers + first_idx;
-    Block* second = NA.headers + second_idx;
+    Block* first = BL_idx(&NA.headers, first_idx);
+    Block* second = BL_idx(&NA.headers, second_idx);
 
     // Clear the block
     first->size += second->size + second->offset;
-    memset(second->ptr, 0, second->size);
 
-    // Shift the headers over
-    memmove(second, second + 1, sizeof(Block) * (NA.header_len - second_idx));
-    NA.header_len--;
+    BL_remove(&NA.headers, first_idx);
+
+    BRL_find_remove(&NA.free_headers, first);
 }
+
+bool is_free(Block* header) { return BRL_find(&NA.free_headers, header) != -1; }
 
 /// Attempts to merged a free block with adjacent freed memory
 /// Significantly more complex and difficult than if the blocks were arranged in
@@ -107,20 +114,20 @@ void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
 /// However, merging is necessary because otherwise we would just split forever
 /// and have to allocate new blocks more often.
 void try_merge_block(uint16_t header_idx) {
-    Block header = NA.headers[header_idx];
+    Block header = *BL_idx(&NA.headers, header_idx);
     uintptr_t start = (uintptr_t)header.ptr;
     uintptr_t end = start + header.size;
 
     bool below = false;
     bool above = false;
 
-    for (int i = 0; i < NA.header_len; i++) {
-        Block other_header = NA.headers[i];
-        if (!other_header.free)
+    for (int i = 0; i < NA.headers.len; i++) {
+        Block* other_header = BL_idx(&NA.headers, i);
+        if (is_free(other_header))
             continue;
 
-        uintptr_t other_start = (uintptr_t)other_header.ptr;
-        uintptr_t other_end = other_start + other_header.size;
+        uintptr_t other_start = (uintptr_t)other_header->ptr;
+        uintptr_t other_end = other_start + other_header->size;
 
         // TODO
         // We might also want to recurse whenever we find a new block
@@ -148,7 +155,7 @@ void try_merge_block(uint16_t header_idx) {
 }
 
 void try_merge_all_blocks() {
-    for (int i = 0; i < NA.header_len; i++) {
+    for (int i = 0; i < NA.headers.len; i++) {
         try_merge_block(i);
     }
 }
@@ -181,17 +188,8 @@ bool expand_memory(uint32_t size) {
         return false;
     }
 
-    if (NA.header_len == NA.header_capacity) {
-        expand_block_list();
-    }
-
-    Block* new_header = (NA.headers + NA.header_len);
-    new_header->ptr = ptr;
-    new_header->size = size;
-    new_header->free = false;
-    new_header->offset = 0;
-
-    NA.header_len++;
+    Block* new_header = BL_new_header(&NA.headers, size, ptr);
+    BRL_push(&NA.used_headers, new_header);
 
     return true;
 }
@@ -199,16 +197,22 @@ bool expand_memory(uint32_t size) {
 /// Attempts to perform an allocation
 /// If it fails, it will not garbage collect nor alloate more memory
 void* try_allocate(uint32_t size) {
-    for (int i = 0; i < NA.header_len; i++) {
-        Block* header = NA.headers + i;
+    printf("Trying to allocate: %d\n", size);
+    print_headers();
+    for (int i = 0; i < NA.headers.len; i++) {
+        Block* header = BL_idx(&NA.headers, i);
 
-        if (!header->free || header->size < size)
+        if (!is_free(header) || header->size < size)
             continue;
 
         align_block(header);
-        header->free = false;
 
-        try_split_block(header, size);
+        BRL_find_remove(&NA.used_headers, header);
+        BRL_push(&NA.free_headers, header);
+
+        // We have to assign here, because our pointer could become invalid if
+        // `NA.headers` is reallocated
+        header = try_split_block(i, size);
 
         memset(header->ptr, 0, header->size);
 
@@ -219,24 +223,15 @@ void* try_allocate(uint32_t size) {
 }
 
 __attribute__((constructor)) void new_allocator() {
-    NA.headers = map_new(INITIAL_HEADER_BUFFER_CAPACITY * sizeof(Block));
-    if (NA.headers == NULL) {
-        printf("Failed to allocate the NARSIRABAD_ALLOCATOR allocator\n");
-        exit(1);
-    }
+    NA.headers = BL_new(INITIAL_HEADER_BUFFER_CAPACITY);
 
-    NA.headers->free = true;
-    NA.headers->size = INITIAL_ALLOCATOR_SIZE;
-    NA.headers->offset = 0;
-
-    NA.headers->ptr = map_new(INITIAL_ALLOCATOR_SIZE);
-    if (NA.headers->ptr == NULL) {
+    void* ptr = map_new(INITIAL_ALLOCATOR_SIZE);
+    if (ptr == NULL) {
         printf("Failed to allocate first block of allocator\n");
         exit(1);
     }
 
-    NA.header_capacity = INITIAL_HEADER_BUFFER_CAPACITY;
-    NA.header_len = 1;
+    BL_new_header(&NA.headers, INITIAL_ALLOCATOR_SIZE, ptr);
 
     bottom_of_stack = (uintptr_t)__builtin_stack_address();
 
@@ -254,10 +249,12 @@ __attribute__((destructor)) void destroy_allocator() {
     // But we can't just unmmap the first block, because there might be multiple
     // non-contiguous mappingr across all the headers
     for (int i = 0; i < NA.header_len; i++) {
-        Block header = NA.headers[i];
-        assert(header.ptr != NULL);
+        Block* header = &NA.headers[i];
+        assert(header->ptr != NULL);
 
-        deallocate(header.ptr);
+        header->free = true;
+        header->size += header->offset;
+        header->offset = 0;
     }
     try_merge_all_blocks();
 
@@ -298,7 +295,10 @@ void* allocate(uint32_t size) {
     // However, we're going to go ahead and split them again anyway, which might
     // end up being really inefficient
     garbage_collect();
+    printf("here\n");
     try_merge_all_blocks();
+
+    print_headers();
 
     ptr = try_allocate(size);
     if (ptr != NULL) {
@@ -309,11 +309,13 @@ void* allocate(uint32_t size) {
     if (!expand_success)
         return NULL;
 
+    printf("Post expansion\n");
+
     // After expanding, we know that the only
     // valid header will be the last in the buffer
     Block* block = NA.headers + NA.header_len - 1;
     block->free = false;
-    try_split_block(block, size);
+    try_split_block(NA.header_len - 1, size);
 
     return block->ptr;
 }
