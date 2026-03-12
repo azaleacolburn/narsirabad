@@ -63,13 +63,14 @@ void new_free_header(void* ptr, size_t size) {
  * Returns the address of the first part of the block. If the block list is
  * not reallocated, it will be equal to `header`.
  *
- * `header` - The header of the block you wish to split.
- * `new_size` - The new size of the allocation, does not include the offset
- *     If you wish to include the offset, it should be set in
+ * `block_idx` - The index of the header in `NA.used_blocks` that you wish to
+ * split
+ * `new_size` - The new size of the allocation, does not include the
+ * offset If you wish to include the offset, it should be set in
  * `header->offset` before calling this function.
  */
 Block* try_split_block(uint32_t block_idx, uint32_t new_size) {
-    Block* header = BRL_idx(&NA.free_headers, block_idx);
+    Block* header = BRL_idx(&NA.used_headers, block_idx);
     // We have to save the pointer
     // because `header` will become invalid if we expand the block list
     uintptr_t ptr = (uintptr_t)header->ptr;
@@ -84,7 +85,7 @@ Block* try_split_block(uint32_t block_idx, uint32_t new_size) {
     // Create new header
     new_free_header((void*)(ptr + new_size), remaining);
 
-    return BRL_idx(&NA.free_headers, block_idx);
+    return BRL_idx(&NA.used_headers, block_idx);
 }
 
 /*
@@ -221,7 +222,11 @@ void* try_allocate(uint32_t size) {
         use_block(header);
         // We have to assign here, because our pointer could become invalid if
         // `NA.headers` is reallocated
-        header = try_split_block(i, size);
+        //
+        // Additionally, we can't use `i`, since that is the old idx in
+        // `NA.free_headers` The block is now in `NA.used_headers`
+        header = try_split_block(NA.used_headers.len - 1, size);
+        print_headers();
 
         memset(header->ptr, 0, header->size);
 
