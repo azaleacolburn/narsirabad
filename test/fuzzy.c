@@ -11,7 +11,7 @@ int main() {
 
     printf("Begin Fuzzy Testing for %d Iterations\n", iterations);
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 100; i++) {
         int bytes = random() % (sizeof(int) * 1000);
         int ints = bytes / sizeof(int);
 

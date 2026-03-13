@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #define NEW_BLOCK_THRESHOLD 8
 #define INITIAL_ALLOCATOR_SIZE 128 * sizeof(int)
@@ -178,12 +179,18 @@ void align_block(Block* header) {
 // TODO
 // Maybe realign here
 void use_block(Block* block) {
-    BRL_find_remove(&NA.free_headers, block);
+    bool was_free = BRL_find_remove(&NA.free_headers, block);
+    if (!was_free)
+        return;
+
     BRL_push(&NA.used_headers, block);
 }
 
 void free_block(Block* block) {
-    BRL_find_remove(&NA.used_headers, block);
+    bool was_used = BRL_find_remove(&NA.used_headers, block);
+    if (!was_used)
+        return;
+
     BRL_push(&NA.free_headers, block);
 
     block->size += block->offset;
@@ -238,10 +245,10 @@ void* try_allocate(uint32_t size) {
 }
 
 __attribute__((constructor)) void new_allocator() {
-    NA.headers = BL_new(INITIAL_HEADER_BUFFER_CAPACITY);
+    NA.headers = BL_new();
 
-    NA.free_headers = BRL_new(INITIAL_HEADER_BUFFER_CAPACITY);
-    NA.used_headers = BRL_new(INITIAL_HEADER_BUFFER_CAPACITY);
+    NA.free_headers = BRL_new();
+    NA.used_headers = BRL_new();
 
     void* ptr = map_new(INITIAL_ALLOCATOR_SIZE);
     if (ptr == NULL) {
