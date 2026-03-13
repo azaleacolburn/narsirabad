@@ -49,7 +49,7 @@
                                                                                \
         memset(list->arr + idx, 0, sizeof(inner_type));                        \
         memmove(list->arr + idx, list->arr + idx + 1,                          \
-                (list->len - idx) * sizeof(inner_type));                       \
+                (list->len - idx - 1) * sizeof(inner_type));                   \
                                                                                \
         list->len--;                                                           \
     }

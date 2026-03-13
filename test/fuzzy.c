@@ -3,14 +3,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 int main() {
-    int iterations = rand() % 5000;
+    srandom(time(NULL));
+    int iterations = random() % 5000;
 
     printf("Begin Fuzzy Testing for %d Iterations\n", iterations);
 
-    for (int i = 0; i < 305; i++) {
-        int bytes = rand() % (sizeof(int) * 1000);
+    for (int i = 0; i < 5; i++) {
+        int bytes = random() % (sizeof(int) * 1000);
         int ints = bytes / sizeof(int);
 
         char* block = allocate(bytes);

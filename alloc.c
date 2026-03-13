@@ -35,7 +35,7 @@ void print_headers() {
     for (int i = 0; i < NA.free_headers.len; i++) {
         Block* header = BRL_idx(&NA.free_headers, i);
 
-        printf("\t{ ptr: %po; size: %lu; offset: %d }\n", header->ptr,
+        printf("\t{ ptr: %po; size: 0x%lx; offset: %d }\n", header->ptr,
                header->size, header->offset);
     }
 
@@ -44,12 +44,19 @@ void print_headers() {
     for (int i = 0; i < NA.used_headers.len; i++) {
         Block* header = BRL_idx(&NA.used_headers, i);
 
-        printf("\t{ ptr: %po; size: %lu; offset: %d }\n", header->ptr,
+        printf("\t{ ptr: %po; size: 0x%lx; offset: %d }\n", header->ptr,
                header->size, header->offset);
     }
 
     puts("");
 }
+
+/*
+ * Returns a boolean indicating whether the block is available for use.
+ *
+ * `header` - Pointer to the header of the block.
+ */
+bool is_free(Block* header) { return BRL_find(&NA.free_headers, header) != -1; }
 
 void new_free_header(void* ptr, size_t size) {
     // These will automatically expand the lists
@@ -97,8 +104,8 @@ Block* try_split_block(uint32_t block_idx, uint32_t new_size) {
  * in the `NA.free_headers` list.
  */
 void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
-    Block* first = BL_idx(&NA.headers, first_idx);
-    Block* second = BL_idx(&NA.headers, second_idx);
+    Block* first = BRL_idx(&NA.free_headers, first_idx);
+    Block* second = BRL_idx(&NA.free_headers, second_idx);
 
     // Expand the first block
     first->size += second->size + second->offset;
@@ -108,52 +115,46 @@ void merge_blocks(uint16_t first_idx, uint16_t second_idx) {
     BRL_remove(&NA.free_headers, second_idx);
 }
 
-bool is_free(Block* header) { return BRL_find(&NA.free_headers, header) != -1; }
-
-/// Attempts to merged a free block with adjacent freed memory
-/// Significantly more complex and difficult than if the blocks were arranged in
-/// a linked list
-///
-/// However, merging is necessary because otherwise we would just split forever
-/// and have to allocate new blocks more often.
-void try_merge_block(uint16_t header_idx) {
-    Block header = *BL_idx(&NA.headers, header_idx);
+/*
+ * Attempts to merge every block past `header_idx` with other memory adjacent
+ * free blocks.
+ *
+ * To try merging every block: `try_merge_block(0)`.
+ *
+ * `header_idx` - The index of the  block in `NA.free_headers` that you wish to
+ * attempt to merge.
+ */
+uint16_t try_merge_block(uint16_t header_idx) {
+    Block header = *BRL_idx(&NA.free_headers, header_idx);
     uintptr_t start = (uintptr_t)header.ptr;
     uintptr_t end = start + header.size;
-
-    bool below = false;
-    bool above = false;
 
     for (int i = 0; i < NA.free_headers.len; i++) {
         Block* other_header = BRL_idx(&NA.free_headers, i);
 
         uintptr_t other_start = (uintptr_t)other_header->ptr;
-        uintptr_t other_end = other_start + other_header->size;
+        uintptr_t other_end =
+            other_start + other_header->size + other_header->offset;
 
         if (other_start == end) {
             merge_blocks(header_idx, i);
 
-            if (header_idx > i)
+            if (header_idx > i--)
                 header_idx--;
-            below = true;
-            i--;
+
         } else if (other_end == start) {
             merge_blocks(i, header_idx);
 
-            if (header_idx > i)
+            if (header_idx > i--)
                 header_idx--;
-            above = true;
-            i--;
         }
-
-        if (below && above)
-            break;
     }
-}
 
-void try_merge_all_blocks() {
-    for (int i = 0; i < NA.free_headers.len; i++) {
-        try_merge_block(i);
+    // If we're not at the end of the list, try to merge the next block
+    if (header_idx + 1 < NA.free_headers.len) {
+        return try_merge_block(header_idx + 1);
+    } else {
+        return header_idx;
     }
 }
 
@@ -273,7 +274,7 @@ __attribute__((destructor)) void destroy_allocator() {
     }
     BRL_free(&NA.used_headers);
 
-    try_merge_all_blocks();
+    try_merge_block(0);
 
     for (int i = 0; i < NA.headers.len; i++) {
         Block* header = BL_idx(&NA.headers, i);
@@ -305,6 +306,8 @@ void* allocate(uint32_t size) {
     if (ptr != NULL)
         return ptr;
 
+    printf("Not found\n");
+
     // WARNING
     // We need to merge all blocks because we might be trying to allocate a size
     // larger than any individual blocks, but can fit in the aggregate size of
@@ -313,9 +316,12 @@ void* allocate(uint32_t size) {
     // However, we're going to go ahead and split them again anyway, which might
     // end up being really inefficient
     garbage_collect();
-    printf("here\n");
-    try_merge_all_blocks();
+    printf("After GC:\n");
+    print_headers();
 
+    try_merge_block(0);
+
+    printf("After Merging:\n");
     print_headers();
 
     ptr = try_allocate(size);
@@ -326,7 +332,9 @@ void* allocate(uint32_t size) {
     bool expand_success = expand_memory(size);
     if (!expand_success)
         return NULL;
-    printf("Post expansion\n");
+
+    printf("After Expanding:\n");
+    print_headers();
 
     Block* block = BRL_idx(&NA.used_headers, NA.used_headers.len - 1);
 
@@ -336,16 +344,16 @@ void* allocate(uint32_t size) {
 }
 
 void deallocate(void* ptr) {
-    printf("Deallocating:\n");
+    printf("Deallocating %p:\n", ptr);
     print_headers();
 
     for (int i = 0; i < NA.used_headers.len; i++) {
-        Block* header = BL_idx(&NA.headers, i);
+        Block* header = BRL_idx(&NA.used_headers, i);
         if (header->ptr != (uint8_t*)ptr + header->offset)
             continue;
 
         free_block(header);
-        try_merge_block(i);
+        try_merge_block(NA.free_headers.len - 1);
 
         break;
     }
