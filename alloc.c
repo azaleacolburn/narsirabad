@@ -1,7 +1,7 @@
 #include "alloc.h"
+#include "blocklist.h"
 #include "gc.h"
 #include "mem.h"
-#include "vec.h"
 
 #include <assert.h>
 #include <stdbool.h>
