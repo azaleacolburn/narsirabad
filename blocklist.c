@@ -5,6 +5,13 @@
 #include <string.h>
 #include <sys/mman.h>
 
+// TODO
+// This is super ugly, just split things into two files and accept that we'll
+// re-implement stuff I really wish I had a generics system here
+//
+// The reason I don't just use a vector that holds a `void*` is because I would
+// like an obvious differentiation between lists of owned blocks and lists of
+// references to blocks
 #define VEC_GEN_new(name, outer_type, inner_type)                              \
     outer_type name(size_t initial_capacity) {                                 \
         void* mapping = map_new(initial_capacity * sizeof(inner_type));        \
@@ -67,6 +74,8 @@
         list->cap = 0;                                                         \
     }
 
+// TODO
+// Figure out what the fuck is going on with the formatting here
 VEC_GEN_new(BL_new, BlockList, Block)
     VEC_GEN_realloc(BL_realloc, BlockList, Block)
         VEC_GEN_idx(BL_idx, BlockList, &)
