@@ -1,5 +1,5 @@
 #include "alloc.h"
-#include "blocklist.h"
+#include "bl.h"
 
 #include <assert.h>
 #include <stdio.h>

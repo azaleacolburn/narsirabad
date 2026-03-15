@@ -1,5 +1,6 @@
 #include "alloc.h"
-#include "blocklist.h"
+#include "bl.h"
+#include "brl.h"
 #include "gc.h"
 #include "mem.h"
 
