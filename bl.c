@@ -46,9 +46,11 @@ void BL_remove(BlockList* list, size_t idx) {
         return;
     }
 
-    memset(list->arr + idx, 0, sizeof(Block));
-    memmove(list->arr + idx, list->arr + idx + 1,
-            (list->len - idx - 1) * sizeof(Block));
+    Block* clear_address = list->arr + idx;
+    size_t remaining_bytes = (list->len - idx - 1) * sizeof(Block);
+
+    memset(clear_address, 0, sizeof(Block));
+    memmove(clear_address, clear_address + 1, remaining_bytes);
 
     list->len--;
 }
@@ -67,7 +69,7 @@ void BL_free(BlockList* list) {
 // TODO
 // This function exists because otherwise we'd have to create a `Block`
 // then pass it into the push function, which is slow
-Block* BL_new_header(BlockList* list, size_t size, void* ptr) {
+size_t BL_new_header(BlockList* list, size_t size, void* ptr) {
     if (list->len == list->cap) {
         BL_realloc(list);
     }
@@ -77,16 +79,9 @@ Block* BL_new_header(BlockList* list, size_t size, void* ptr) {
     next_header->ptr = ptr;
     next_header->offset = 0;
 
-    list->len++;
-
-    return next_header;
+    return list->len++;
 }
 
-/*
- * NOTE
- * Putting this logic in a macro is annoying because we'd have to make
- * conditional function calls.
- */
 void BL_push(BlockList* list, Block block) {
     if (list->len == list->cap) {
         BL_realloc(list);
@@ -96,15 +91,11 @@ void BL_push(BlockList* list, Block block) {
 }
 
 int BL_find(BlockList* list, Block* block) {
-    int idx = 0;
-    while (idx < list->len) {
-        if (list->arr + idx == block)
-            break;
+    for (int idx = -1; idx < list->len; idx++)
+        if (list->arr[idx].ptr == block)
+            return idx;
 
-        idx++;
-    }
-
-    return idx;
+    return -1;
 }
 
 bool BL_find_remove(BlockList* list, Block* block) {

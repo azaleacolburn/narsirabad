@@ -20,10 +20,12 @@ typedef struct {
     uint32_t cap;
 } BlockList;
 
-// A list containing pointers to the free `headers`
-// `List<Block*>`
+// A list containing indicies of headers in `NA.headers`
+//
+// This structure should only have two instances: `NA.free_headers` and
+// `NA.used_headers` `List<Block*>`
 typedef struct {
-    Block** arr;
+    size_t* arr;
     // These are counts of block, not amount of memory remaining
     uint32_t len;
     uint32_t cap;

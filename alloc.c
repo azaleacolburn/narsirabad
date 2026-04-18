@@ -60,10 +60,19 @@ void print_headers() {
  */
 bool is_free(Block* header) { return BRL_find(&NA.free_headers, header) != -1; }
 
+/*
+ * Creates a new free header owning `size` bytes starting at `ptr`.
+ *
+ * It is the responsibility of the caller to ensure that there are no other
+ * blocks in `NA.headers` that claim to own an overlapping chunk of memory.
+ *
+ * WARNING
+ * This function has the potential to reallocate the `NA.headers` blocklist.
+ */
 void new_free_header(void* ptr, size_t size) {
     // These will automatically expand the lists
-    Block* header = BL_new_header(&NA.headers, size, ptr);
-    BRL_push(&NA.free_headers, header);
+    size_t header_idx = BL_new_header(&NA.headers, size, ptr);
+    BRL_push(&NA.free_headers, header_idx);
 }
 
 /*
@@ -71,6 +80,11 @@ void new_free_header(void* ptr, size_t size) {
  *
  * Returns the address of the first part of the block. If the block list is
  * not reallocated, it will be equal to `header`.
+ *
+ * WARNING
+ * This function has the potential to reallocate the `NA.headers` list,
+ * potentially making every pointer into that list invalid. If this function
+ * does reallocate, consider re-initializing all `BlockRefList` objects.
  *
  * `block_idx` - The index of the header in `NA.used_blocks` that you wish to
  * split
@@ -82,9 +96,9 @@ Block* try_split_block(uint32_t block_idx, uint32_t new_size) {
     Block* header = BRL_idx(&NA.used_headers, block_idx);
     // We have to save the pointer
     // because `header` will become invalid if we expand the block list
-    uintptr_t ptr = (uintptr_t)header->ptr;
+    void* ptr = header->ptr;
 
-    uint32_t remaining = header->size - new_size - header->offset;
+    size_t remaining = header->size - new_size - header->offset;
     if (remaining <= NEW_BLOCK_THRESHOLD) {
         return header;
     }
@@ -183,6 +197,13 @@ void use_block(Block* block) {
     bool was_free = BRL_find_remove(&NA.free_headers, block);
     if (!was_free)
         return;
+
+    // TODO
+    // Remove
+    bool was_used = BRL_find_remove(&NA.used_headers, block);
+    if (was_used) {
+        printf("THIS BLOCK WAS FREE AND USED -> MAKING IT ONLY USED");
+    }
 
     BRL_push(&NA.used_headers, block);
 }

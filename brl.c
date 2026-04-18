@@ -2,10 +2,16 @@
 #include "alloc.h"
 #include "mem.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+
+extern Allocator NARSIRABAD_ALLOCATOR;
+#define NA NARSIRABAD_ALLOCATOR
+
+#define SIZE sizeof(size_t)
 
 BlockRefList BRL_new() {
     size_t page_size = getpagesize();
@@ -16,29 +22,33 @@ BlockRefList BRL_new() {
     BlockRefList list;
     list.arr = mapping;
     list.len = 0;
-    list.cap = page_size / sizeof(Block);
+    list.cap = page_size / SIZE;
 
     return list;
 }
 
 void BRL_realloc(BlockRefList* list) {
-    void* new_mapping = map_new(list->cap * 2 * sizeof(Block*));
+    void* new_mapping = map_new(list->cap * 2 * SIZE);
     if (new_mapping == NULL)
         exit(1);
 
-    memmove(new_mapping, list->arr, list->len * sizeof(Block*));
-    munmap(list->arr, list->cap * sizeof(Block*));
+    // NOTE
+    // `list->len == list->cap` is probably true here
+    // but it's still best to not copy more than we have to
+    // in case there are other circumstances
+    memmove(new_mapping, list->arr, list->len * SIZE);
+    munmap(list->arr, list->cap * SIZE);
 
     list->cap *= 2;
     list->arr = new_mapping;
 }
 
 Block* BRL_idx(BlockRefList* list, size_t idx) {
-    if (list->len <= idx) {
+    if (idx >= list->len) {
         return NULL;
     }
 
-    return list->arr[idx];
+    return &NA.headers.arr[list->arr[idx]];
 }
 
 void BRL_remove(BlockRefList* list, size_t idx) {
@@ -46,50 +56,49 @@ void BRL_remove(BlockRefList* list, size_t idx) {
         return;
     }
 
-    memset(list->arr + idx, 0, sizeof(Block*));
-    memmove(list->arr + idx, list->arr + idx + 1,
-            (list->len - idx - 1) * sizeof(Block*));
+    size_t* clear_address = list->arr + idx;
+    size_t remaining_bytes = (list->len - idx - 1) * SIZE;
+
+    memset(clear_address, 0, SIZE);
+    memmove(clear_address, clear_address + 1, remaining_bytes);
 
     list->len--;
 }
 
-void BRL_free(BlockRefList* list) {
-    int8_t unmap_result = munmap(list->arr, list->cap * sizeof(Block*));
-    if (unmap_result == -1) {
-        exit(1);
-    }
-
-    list->arr = NULL;
-    list->len = 0;
-    list->cap = 0;
-}
-
-void BRL_push(BlockRefList* list, Block* block) {
+void BRL_push(BlockRefList* list, size_t bl_idx) {
     if (list->len == list->cap) {
         BRL_realloc(list);
     }
 
-    list->arr[list->len++] = block;
+    list->arr[list->len++] = bl_idx;
 }
 
-int BRL_find(BlockRefList* list, Block* block) {
-    int idx = 0;
-    while (idx < list->len) {
-        if (list->arr[idx] == block)
-            break;
+int BRL_find(BlockRefList* list, void* buf) {
+    for (int idx = -1; idx < list->len; idx++)
+        if (NA.headers.arr[list->arr[idx]].ptr == buf)
+            return idx;
 
-        idx++;
-    }
-
-    return idx;
+    return -1;
 }
 
-bool BRL_find_remove(BlockRefList* list, Block* block) {
-    int idx = BRL_find(list, block);
+bool BRL_find_remove(BlockRefList* list, void* buf) {
+    int idx = BRL_find(list, buf);
     if (idx == -1)
         return false;
 
     BRL_remove(list, idx);
 
     return true;
+}
+
+void BRL_free(BlockRefList* list) {
+    int8_t unmap_result = munmap(list->arr, list->cap * SIZE);
+    if (unmap_result == -1) {
+        sprintf(stderr, "Failed to unmap BlockRefList: %po", list);
+        exit(1);
+    }
+
+    list->arr = NULL;
+    list->len = 0;
+    list->cap = 0;
 }
