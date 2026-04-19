@@ -6,6 +6,8 @@ Block* BRL_idx(BlockRefList* list, size_t idx);
 
 void BRL_push(BlockRefList* list, size_t bl_idx);
 
+void BRL_push_block(BlockRefList* list, Block* block);
+
 void BRL_remove(BlockRefList* list, size_t idx);
 
 int BRL_find(BlockRefList* list, void* buffer);

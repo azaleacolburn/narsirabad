@@ -90,8 +90,8 @@ void BL_push(BlockList* list, Block block) {
     list->arr[list->len++] = block;
 }
 
-int BL_find(BlockList* list, Block* block) {
-    for (int idx = -1; idx < list->len; idx++)
+size_t BL_find(BlockList* list, Block* block) {
+    for (size_t idx = 0; idx < list->len; idx++)
         if (list->arr[idx].ptr == block)
             return idx;
 

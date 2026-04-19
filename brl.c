@@ -65,16 +65,8 @@ void BRL_remove(BlockRefList* list, size_t idx) {
     list->len--;
 }
 
-void BRL_push(BlockRefList* list, size_t bl_idx) {
-    if (list->len == list->cap) {
-        BRL_realloc(list);
-    }
-
-    list->arr[list->len++] = bl_idx;
-}
-
 int BRL_find(BlockRefList* list, void* buf) {
-    for (int idx = -1; idx < list->len; idx++)
+    for (int idx = 0; idx < list->len; idx++)
         if (NA.headers.arr[list->arr[idx]].ptr == buf)
             return idx;
 
@@ -89,6 +81,19 @@ bool BRL_find_remove(BlockRefList* list, void* buf) {
     BRL_remove(list, idx);
 
     return true;
+}
+
+void BRL_push(BlockRefList* list, size_t bl_idx) {
+    if (list->len == list->cap) {
+        BRL_realloc(list);
+    }
+
+    list->arr[list->len++] = bl_idx;
+}
+
+void BRL_push_block(BlockRefList* list, Block* block) {
+    size_t idx = BRL_find(list, block);
+    BRL_push(list, idx);
 }
 
 void BRL_free(BlockRefList* list) {

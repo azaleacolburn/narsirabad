@@ -198,14 +198,7 @@ void use_block(Block* block) {
     if (!was_free)
         return;
 
-    // TODO
-    // Remove
-    bool was_used = BRL_find_remove(&NA.used_headers, block);
-    if (was_used) {
-        printf("THIS BLOCK WAS FREE AND USED -> MAKING IT ONLY USED");
-    }
-
-    BRL_push(&NA.used_headers, block);
+    BRL_push_block(&NA.used_headers, block);
 }
 
 void free_block(Block* block) {
@@ -213,7 +206,8 @@ void free_block(Block* block) {
     if (!was_used)
         return;
 
-    BRL_push(&NA.free_headers, block);
+    size_t idx = BL_find(&NA.headers, block);
+    BRL_push_block(&NA.free_headers, block);
 
     block->size += block->offset;
     block->offset = 0;
@@ -230,8 +224,8 @@ bool expand_memory(uint32_t size) {
         return false;
     }
 
-    Block* new_header = BL_new_header(&NA.headers, size, ptr);
-    BRL_push(&NA.used_headers, new_header);
+    size_t idx = BL_new_header(&NA.headers, size, ptr);
+    BRL_push(&NA.used_headers, idx);
 
     return true;
 }
@@ -278,9 +272,9 @@ __attribute__((constructor)) void new_allocator() {
         exit(1);
     }
 
-    Block* first_header =
+    size_t first_header_idx =
         BL_new_header(&NA.headers, INITIAL_ALLOCATOR_SIZE, ptr);
-    BRL_push(&NA.free_headers, first_header);
+    BRL_push(&NA.free_headers, first_header_idx);
 
     bottom_of_stack = (uintptr_t)__builtin_stack_address();
 
@@ -291,12 +285,13 @@ __attribute__((constructor)) void new_allocator() {
 /// This destructor will fail if not all blocks have be deallocated
 __attribute__((destructor)) void destroy_allocator() {
     for (int i = 0; i < NA.used_headers.len; i++) {
+        size_t block_idx = NA.used_headers.arr[i];
         Block* block = BRL_idx(&NA.used_headers, i);
 
         // We don't want to call free_block, because then we would traverse the
         // `NA.used_headers` to remove it, instead of just freeing the whole
         // array at the end
-        BRL_push(&NA.free_headers, block);
+        BRL_push(&NA.free_headers, block_idx);
 
         block->size += block->offset;
         block->offset = 0;

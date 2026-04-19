@@ -16,6 +16,8 @@ void BL_push(BlockList* list, Block block);
 
 Block* BL_idx(BlockList* list, size_t idx);
 
+size_t BL_find(BlockList* list, Block* block);
+
 bool BL_find_remove(BlockList* list, Block* value);
 
 void BL_remove(BlockList* list, size_t idx);
